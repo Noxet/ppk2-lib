@@ -1,6 +1,7 @@
 #include "ppk2.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -11,6 +12,7 @@
 #include <sys/types.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <poll.h>
 
 #define BAUDRATE B115200
 #define _POSIX_SOURCE 1 /* POSIX compliant source */
@@ -44,8 +46,8 @@ Serial::Serial(const std::string &path)
     /* set input mode (non-canonical, no echo,...) */
     m_newtio.c_lflag = 0;
 
-    m_newtio.c_cc[VTIME] = 0; /* inter-character timer unused */
-    m_newtio.c_cc[VMIN] = 5;  /* blocking read until 5 chars received */
+    m_newtio.c_cc[VTIME] = 5; /* inter-character timer unused */
+    m_newtio.c_cc[VMIN] = 0;  /* blocking read until 5 chars received */
 
     tcflush(m_fd, TCIFLUSH);
     tcsetattr(m_fd, TCSANOW, &m_newtio);
@@ -74,6 +76,15 @@ bool Serial::write(char *data, size_t len)
 
 ssize_t Serial::read(char *buf, size_t len)
 {
+    struct pollfd pfd = { .fd = m_fd, .events = POLLIN };
+    int res = poll(&pfd, 1, 500);
+    if (res == 0)
+    {
+        // timeout
+        cout << "TIMEOUT" << endl;
+        return 0;
+    }
+
     ssize_t count = ::read(m_fd, buf, len);
     if (count  < 0) 
     {
@@ -117,20 +128,72 @@ bool PPK2::setDUTPower(bool on)
     return m_serial.write(data, sizeof(data));
 }
 
+void convertADC(uint8_t *data, size_t len)
+{
+    double adcMult = 1.8 / 163840;
+    size_t values = len / 4;
+    double rval[] = { 1031.64, 101.65, 10.15, 0.94, 0.0043 };
+    for (int i = 0; i < values; i += 4)
+    {
+        uint32_t adcVal = (data[3] << 24) | (data[2] << 16) | (data[1] << 8) | (data[0]);
+
+        uint32_t adcRes = (adcVal & 0x3FFF) * 4;
+        uint32_t currMask = ((1 << 3) - 1) << 14;
+        uint32_t currRange = (adcVal & currMask) >> 14;
+        currRange = min(currRange, (uint32_t) 4);
+        double analogValNoGain = (adcVal - 0) * (adcMult / rval[currRange]);
+        double current = 1 * (analogValNoGain * (1 * analogValNoGain + 1) + (0 * (3200.0 / 1000) + 0));
+        current *= 1000000;
+
+        printf("%.4f ", current);
+    }
+}
+
+
+void PPK2::stopMeasure()
+{
+    char data[1] = { TOCHAR(Command::AVERAGE_STOP) };
+    m_serial.write(data, sizeof(data));
+}
 
 void PPK2::startMeasure()
 {
     char data[1] = { TOCHAR(Command::AVERAGE_START) };
     m_serial.write(data, sizeof(data));
 
-    char buf[1024];
-    while (true)
+    uint8_t buf[1024];
+
+    int reads = 0;
+    while (reads < 2000)
     {
-        ssize_t count = m_serial.read(buf, sizeof(buf) - 1);
+        ssize_t count = m_serial.read((char *)buf, sizeof(buf) - 1);
         if (count == 0) continue;
-        buf[count] = 0;
-        cout << buf << endl;
+        printf("[");
+        for (int i = 0; i < count; i++)
+        {
+            convertADC(buf, count);
+            // printf("%x ", (uint8_t) buf[i]);
+        }
+        printf("] count: %ld\n", count);
+        reads++;
     }
+}
+
+
+void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
+{
+    char data[1] = { TOCHAR(Command::GET_META_DATA) };
+    m_serial.write(data, sizeof(data));
+
+    ssize_t count = 0;
+    size_t totalCount = 0;
+    do
+    {
+        count = m_serial.read(&buf[totalCount], len);
+        totalCount += count;
+    } while (count != 0);
+
+    *dataRead = totalCount;
 }
 
 
@@ -140,11 +203,15 @@ int main(int argc, char *argv[]) {
     PPK2 ppk{"/dev/ttyACM0"};
     ppk.setMode(Mode::SRC_MODE);
     ppk.setSourceVoltage(3200);
-    ppk.setDUTPower(true);
+    ppk.stopMeasure();
+    // ppk.setDUTPower(true);
 
 
+    char buf[1024 * 10];
+    ssize_t count;
+    ppk.getMeta(buf, sizeof(buf) - 1, &count);
+    buf[count] = 0;
+    cout << buf << endl;
+    cout << "DONE" << endl;
     // ppk.startMeasure();
-    // char get_meta[1] = {0x19};
-    // write(fd, get_meta, 1);
-
 }

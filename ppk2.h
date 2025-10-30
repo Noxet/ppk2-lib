@@ -70,6 +70,8 @@ public:
     bool setDUTPower(bool on);
     bool setMode(enum Mode mode);
     void startMeasure();
+    void stopMeasure();
+    void getMeta(char *buf, size_t len, ssize_t *dataRead);
 
 private:
     Serial m_serial;
