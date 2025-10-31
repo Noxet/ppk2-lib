@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <ios>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <system_error>
+#include <sstream>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -128,11 +131,10 @@ bool PPK2::setDUTPower(bool on)
     return m_serial.write(data, sizeof(data));
 }
 
-void convertADC(uint8_t *data, size_t len)
+void PPK2::convertADC(uint8_t *data, size_t len)
 {
     double adcMult = 1.8 / 163840;
     size_t values = len / 4;
-    double rval[] = { 1031.64, 101.65, 10.15, 0.94, 0.0043 };
     for (int i = 0; i < values; i += 4)
     {
         uint32_t adcVal = (data[3] << 24) | (data[2] << 16) | (data[1] << 8) | (data[0]);
@@ -141,8 +143,9 @@ void convertADC(uint8_t *data, size_t len)
         uint32_t currMask = ((1 << 3) - 1) << 14;
         uint32_t currRange = (adcVal & currMask) >> 14;
         currRange = min(currRange, (uint32_t) 4);
-        double analogValNoGain = (adcVal - 0) * (adcMult / rval[currRange]);
-        double current = 1 * (analogValNoGain * (1 * analogValNoGain + 1) + (0 * (3200.0 / 1000) + 0));
+        double analogValNoGain = (adcRes - m_O[currRange]) * (adcMult / m_R[currRange]);
+        double current = m_UG[currRange] * (analogValNoGain * (m_GS[currRange] * analogValNoGain + m_GI[currRange])
+                + (m_S[currRange] * (m_vdd / 1000.0) + m_I[currRange]));
         current *= 1000000;
 
         printf("%.4f ", current);
@@ -164,9 +167,9 @@ void PPK2::startMeasure()
     uint8_t buf[1024];
 
     int reads = 0;
-    while (reads < 2000)
+    while (reads < 100)
     {
-        ssize_t count = m_serial.read((char *)buf, sizeof(buf) - 1);
+        ssize_t count = m_serial.read((char *)buf, sizeof(buf));
         if (count == 0) continue;
         printf("[");
         for (int i = 0; i < count; i++)
@@ -176,6 +179,16 @@ void PPK2::startMeasure()
         }
         printf("] count: %ld\n", count);
         reads++;
+    }
+}
+
+
+void PPK2::reset()
+{
+    char data[1] = { TOCHAR(Command::RESET) };
+    if (!m_serial.write(data, sizeof(data)))
+    {
+        cerr << "Failed to write RESET" << endl;
     }
 }
 
@@ -191,27 +204,97 @@ void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
     {
         count = m_serial.read(&buf[totalCount], len);
         totalCount += count;
+        cout << totalCount << endl;
     } while (count != 0);
 
     *dataRead = totalCount;
 }
 
+template<typename T>
+T parseRow(istringstream &iss)
+{
+    iss.ignore(numeric_limits<streamsize>::max(), ':');
 
-int main(int argc, char *argv[]) {
-    int fd, c, res;
+    T v{};
+    iss >> v;
+    return v;
+}
 
+void PPK2::parseMeta(const string &meta)
+{
+    istringstream iss(meta);
+    int calibrated = parseRow<int>(iss);
+
+    m_R[0] = parseRow<double>(iss);
+    m_R[1] = parseRow<double>(iss);
+    m_R[2] = parseRow<double>(iss);
+    m_R[3] = parseRow<double>(iss);
+    m_R[4] = parseRow<double>(iss);
+
+    m_GS[0] = parseRow<double>(iss);
+    m_GS[1] = parseRow<double>(iss);
+    m_GS[2] = parseRow<double>(iss);
+    m_GS[3] = parseRow<double>(iss);
+    m_GS[4] = parseRow<double>(iss);
+
+    m_GI[0] = parseRow<double>(iss);
+    m_GI[1] = parseRow<double>(iss);
+    m_GI[2] = parseRow<double>(iss);
+    m_GI[3] = parseRow<double>(iss);
+    m_GI[4] = parseRow<double>(iss);
+
+    m_O[0] = parseRow<double>(iss);
+    m_O[1] = parseRow<double>(iss);
+    m_O[2] = parseRow<double>(iss);
+    m_O[3] = parseRow<double>(iss);
+    m_O[4] = parseRow<double>(iss);
+
+    m_vdd = parseRow<int>(iss);
+    int hw = parseRow<int>(iss);
+    int mode = parseRow<int>(iss);
+
+    m_S[0] = parseRow<double>(iss);
+    m_S[1] = parseRow<double>(iss);
+    m_S[2] = parseRow<double>(iss);
+    m_S[3] = parseRow<double>(iss);
+    m_S[4] = parseRow<double>(iss);
+
+    m_I[0] = parseRow<double>(iss);
+    m_I[1] = parseRow<double>(iss);
+    m_I[2] = parseRow<double>(iss);
+    m_I[3] = parseRow<double>(iss);
+    m_I[4] = parseRow<double>(iss);
+
+    m_UG[0] = parseRow<double>(iss);
+    m_UG[1] = parseRow<double>(iss);
+    m_UG[2] = parseRow<double>(iss);
+    m_UG[3] = parseRow<double>(iss);
+    m_UG[4] = parseRow<double>(iss);
+
+    int ia = parseRow<int>(iss);
+}
+
+
+int main(int argc, char *argv[])
+{
     PPK2 ppk{"/dev/ttyACM0"};
+    ppk.stopMeasure();
+    // ppk.reset();
     ppk.setMode(Mode::SRC_MODE);
     ppk.setSourceVoltage(3200);
-    ppk.stopMeasure();
-    // ppk.setDUTPower(true);
+    ppk.setDUTPower(true);
 
 
-    char buf[1024 * 10];
+    char *buf = (char *) malloc(100 * 1024);
     ssize_t count;
     ppk.getMeta(buf, sizeof(buf) - 1, &count);
     buf[count] = 0;
     cout << buf << endl;
     cout << "DONE" << endl;
+
+    ppk.parseMeta(buf);
     // ppk.startMeasure();
+
+    sleep(5);
+    free(buf);
 }

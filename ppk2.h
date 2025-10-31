@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <termios.h>
 
@@ -71,8 +72,24 @@ public:
     bool setMode(enum Mode mode);
     void startMeasure();
     void stopMeasure();
+    void reset();
     void getMeta(char *buf, size_t len, ssize_t *dataRead);
+    void parseMeta(const std::string &meta);
+
+private:
+
+    void convertADC(uint8_t *data, size_t len);
 
 private:
     Serial m_serial;
+
+    double m_R[5];
+    double m_GS[5];
+    double m_GI[5];
+    double m_O[5];
+    double m_S[5];
+    double m_I[5];
+    double m_UG[5];
+
+    int m_vdd;
 };
