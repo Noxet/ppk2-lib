@@ -65,20 +65,22 @@ class PPK2
 {
 public:
     PPK2(const std::string &path);
-    ~PPK2() = default;
+    ~PPK2();
 
     bool setSourceVoltage(unsigned int voltage);
     bool setDUTPower(bool on);
     bool setMode(enum Mode mode);
     void startMeasure();
-    void stopMeasure();
+    bool stopMeasure();
     void reset();
     void getMeta(char *buf, size_t len, ssize_t *dataRead);
     void parseMeta(const std::string &meta);
+    void printMeta();
 
 private:
 
-    void convertADC(uint8_t *data, size_t len);
+    // void convertADC(uint8_t *data, size_t len);
+    void convertADC(uint8_t *data, size_t len, double *result, size_t &cnt);
 
 private:
     Serial m_serial;

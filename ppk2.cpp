@@ -1,10 +1,14 @@
 #include "ppk2.h"
+#include "profiler.cpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <ios>
 #include <iostream>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <system_error>
@@ -42,7 +46,8 @@ Serial::Serial(const std::string &path)
     tcgetattr(m_fd, &m_oldtio); /* save current port settings */
 
     memset(&m_newtio, 0, sizeof(m_newtio));
-    m_newtio.c_cflag = BAUDRATE | CRTSCTS | CS8 | CLOCAL | CREAD;
+    // m_newtio.c_cflag = BAUDRATE | CRTSCTS | CS8 | CLOCAL | CREAD;
+    m_newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
     m_newtio.c_iflag = IGNPAR;
     m_newtio.c_oflag = 0;
 
@@ -58,8 +63,8 @@ Serial::Serial(const std::string &path)
 
 Serial::~Serial()
 {
-    if (m_fd >= 0) close(m_fd);
     tcsetattr(m_fd, TCSANOW, &m_oldtio);
+    if (m_fd >= 0) close(m_fd);
     cout << "Cleanup serial" << endl;
 }
 
@@ -98,10 +103,19 @@ ssize_t Serial::read(char *buf, size_t len)
 }
 
 
+/**
+ * PPK2 Class
+ */
+
 PPK2::PPK2(const string &path)
     : m_serial(path)
 {
     
+}
+
+PPK2::~PPK2()
+{
+    //reset();
 }
 
 bool PPK2::setMode(enum Mode mode)
@@ -131,13 +145,16 @@ bool PPK2::setDUTPower(bool on)
     return m_serial.write(data, sizeof(data));
 }
 
-void PPK2::convertADC(uint8_t *data, size_t len)
+void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
 {
     double adcMult = 1.8 / 163840;
+    assert(len % 4 == 0);
     size_t values = len / 4;
-    for (int i = 0; i < values; i += 4)
+    cout << "values: " << values << endl;
+    cnt = 0;
+    for (int i = 0; i < len; i += 4)
     {
-        uint32_t adcVal = (data[3] << 24) | (data[2] << 16) | (data[1] << 8) | (data[0]);
+        uint32_t adcVal = (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | (data[i + 0]);
 
         uint32_t adcRes = (adcVal & 0x3FFF) * 4;
         uint32_t currMask = ((1 << 3) - 1) << 14;
@@ -148,37 +165,70 @@ void PPK2::convertADC(uint8_t *data, size_t len)
                 + (m_S[currRange] * (m_vdd / 1000.0) + m_I[currRange]));
         current *= 1000000;
 
-        printf("%.4f ", current);
+        result[cnt] = current;
+        cnt++;
+        printf(" %.4f ", current);
     }
 }
 
 
-void PPK2::stopMeasure()
+bool PPK2::stopMeasure()
 {
     char data[1] = { TOCHAR(Command::AVERAGE_STOP) };
-    m_serial.write(data, sizeof(data));
+    if (!m_serial.write(data, sizeof(data)))
+    {
+        cout << "Failed to stop measure" << endl;
+        return false;
+    }
+
+    // clear remaining data in serial buffer
+    char buf[1024];
+    while (m_serial.read(buf, sizeof(buf)) != 0);
+
+    return true;
 }
 
 void PPK2::startMeasure()
 {
+    double *result = (double *) malloc(1024 * 1024 * sizeof(*result));
+    assert(result);
+
+    TimeFunction;
+
     char data[1] = { TOCHAR(Command::AVERAGE_START) };
     m_serial.write(data, sizeof(data));
 
-    uint8_t buf[1024];
+    uint8_t buf[128]{};
 
     int reads = 0;
-    while (reads < 100)
+    size_t totCnt = 0;
+    while (reads < 500)
     {
         ssize_t count = m_serial.read((char *)buf, sizeof(buf));
         if (count == 0) continue;
+        // printf("RAW (%ld): [", count);
+        // for (int i = 0; i < count; i++)
+        // {
+        //     printf("%02x, ", buf[i]);
+        // }
+        // printf("]\n");
+        size_t cnt = 0;
         printf("[");
-        for (int i = 0; i < count; i++)
-        {
-            convertADC(buf, count);
-            // printf("%x ", (uint8_t) buf[i]);
-        }
+        convertADC(buf, count, &result[cnt], cnt);
+        totCnt += cnt;
         printf("] count: %ld\n", count);
         reads++;
+    }
+
+    ofstream file("out.txt");
+    if (!file)
+    {
+        cerr << "Failed to open file" << endl;
+    }
+
+    for (size_t i = 0; i < totCnt; i++)
+    {
+        file << result[i] << ", ";
     }
 }
 
@@ -195,16 +245,27 @@ void PPK2::reset()
 
 void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
 {
+    TimeFunction;
+
     char data[1] = { TOCHAR(Command::GET_META_DATA) };
-    m_serial.write(data, sizeof(data));
+    if (!m_serial.write(data, sizeof(data)))
+    {
+        cout << "Failed to get meta data" << endl;
+    }
 
     ssize_t count = 0;
     size_t totalCount = 0;
     do
     {
         count = m_serial.read(&buf[totalCount], len);
+        // printf("Data during get meta: [");
+        // for (int i = totalCount; i < totalCount + count; i++)
+        // {
+        //     printf("%x ", buf[i]);
+        // }
+        // printf("]\n");
         totalCount += count;
-        cout << totalCount << endl;
+        // cout << "tot: " << totalCount << endl;
     } while (count != 0);
 
     *dataRead = totalCount;
@@ -275,26 +336,99 @@ void PPK2::parseMeta(const string &meta)
 }
 
 
+void PPK2::printMeta()
+{
+    printf("R: [");
+    for (const auto &i : m_R)
+    {
+        printf("%f ", i);
+    }
+
+    printf("]\nGS: [");
+    for (const auto &i : m_GS)
+    {
+        printf("%f ", i);
+    }
+
+    printf("]\nGI: [");
+    for (const auto &i : m_GI)
+    {
+        printf("%f ", i);
+    }
+
+    printf("]\nO: [");
+    for (const auto &i : m_O)
+    {
+        printf("%f ", i);
+    }
+
+    printf("]\nS: [");
+    for (const auto &i : m_S)
+    {
+        printf("%f ", i);
+    }
+
+    printf("]\nI: [");
+    for (const auto &i : m_I)
+    {
+        printf("%f ", i);
+    }
+
+    printf("]\nUG: [");
+    for (const auto &i : m_UG)
+    {
+        printf("%f ", i);
+    }
+    printf("]\n");
+}
+
+
 int main(int argc, char *argv[])
 {
+    beginProfiler();
+
     PPK2 ppk{"/dev/ttyACM0"};
-    ppk.stopMeasure();
-    // ppk.reset();
-    ppk.setMode(Mode::SRC_MODE);
-    ppk.setSourceVoltage(3200);
-    ppk.setDUTPower(true);
-
-
+    if (!ppk.stopMeasure())
+    {
+        cout << "Failed to stop measure" << endl;
+    }
     char *buf = (char *) malloc(100 * 1024);
     ssize_t count;
-    ppk.getMeta(buf, sizeof(buf) - 1, &count);
+    size_t tries = 0;
+    do
+    {
+        ppk.getMeta(buf, sizeof(buf) - 1, &count);
+        if (count == 0)
+        {
+            cout << "Could not read meta" << endl;
+        }
+        tries++;
+    } while (count == 0 && tries < 5);
+
+    if (tries >= 5)
+    {
+        cout << "Failed to get meta, quitting..." << endl;
+        return EXIT_FAILURE;
+    }
+
     buf[count] = 0;
     cout << buf << endl;
     cout << "DONE" << endl;
 
     ppk.parseMeta(buf);
-    // ppk.startMeasure();
+    // ppk.printMeta();
+    // ppk.reset();
+    ppk.setMode(Mode::SRC_MODE);
+    ppk.setSourceVoltage(3300);
+    ppk.setDUTPower(true);
+    // sleep(2);
 
-    sleep(5);
+
+    ppk.startMeasure();
+    ppk.stopMeasure();
+
+    ppk.setDUTPower(false);
     free(buf);
+
+    endProfiler();
 }
