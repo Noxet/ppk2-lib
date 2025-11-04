@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -73,7 +74,7 @@ bool Serial::write(char *data, size_t len)
     size_t totalWrite{0};
     do
     {
-        size_t dataWritten = ::write(m_fd, &data[totalWrite], len - totalWrite);
+        ssize_t dataWritten = ::write(m_fd, &data[totalWrite], len - totalWrite);
         if (dataWritten < 0) return false;
         totalWrite += dataWritten;
     } while (totalWrite < len);
@@ -149,10 +150,10 @@ void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
 {
     double adcMult = 1.8 / 163840;
     assert(len % 4 == 0);
-    size_t values = len / 4;
-    cout << "values: " << values << endl;
+    // size_t values = len / 4;
+    // cout << "values: " << values << endl;
     cnt = 0;
-    for (int i = 0; i < len; i += 4)
+    for (size_t i = 0; i + 3 < len; i += 4)
     {
         uint32_t adcVal = (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | (data[i + 0]);
 
@@ -167,7 +168,7 @@ void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
 
         result[cnt] = current;
         cnt++;
-        printf(" %.4f ", current);
+        // printf(" %.4f ", current);
     }
 }
 
@@ -182,7 +183,7 @@ bool PPK2::stopMeasure()
     }
 
     // clear remaining data in serial buffer
-    char buf[1024];
+    char buf[128];
     while (m_serial.read(buf, sizeof(buf)) != 0);
 
     return true;
@@ -202,23 +203,28 @@ void PPK2::startMeasure()
 
     int reads = 0;
     size_t totCnt = 0;
-    while (reads < 500)
     {
-        ssize_t count = m_serial.read((char *)buf, sizeof(buf));
-        if (count == 0) continue;
-        // printf("RAW (%ld): [", count);
-        // for (int i = 0; i < count; i++)
-        // {
-        //     printf("%02x, ", buf[i]);
-        // }
-        // printf("]\n");
-        size_t cnt = 0;
-        printf("[");
-        convertADC(buf, count, &result[cnt], cnt);
-        totCnt += cnt;
-        printf("] count: %ld\n", count);
-        reads++;
+        TimeBlock("Read and convert");
+        auto start = chrono::steady_clock::now();
+        while (chrono::steady_clock::now() - start < 5s)
+        {
+            ssize_t count = m_serial.read((char *)buf, sizeof(buf));
+            if (count == 0) continue;
+            // printf("RAW (%ld): [", count);
+            // for (int i = 0; i < count; i++)
+            // {
+            //     printf("%02x, ", buf[i]);
+            // }
+            // printf("]\n");
+            size_t cnt = 0;
+            // printf("[");
+            convertADC(buf, count, &result[totCnt], cnt);
+            totCnt += cnt;
+            reads++;
+        }
     }
+
+    cout << "TOTAL COUNT: " << totCnt << endl;
 
     ofstream file("out.txt");
     if (!file)
@@ -247,10 +253,10 @@ void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
 {
     TimeFunction;
 
-    char data[1] = { TOCHAR(Command::GET_META_DATA) };
+    char data[] = { TOCHAR(Command::GET_META_DATA) };
     if (!m_serial.write(data, sizeof(data)))
     {
-        cout << "Failed to get meta data" << endl;
+        cerr << "Failed to get meta data\n";
     }
 
     ssize_t count = 0;
@@ -387,7 +393,13 @@ int main(int argc, char *argv[])
 {
     beginProfiler();
 
-    PPK2 ppk{"/dev/ttyACM0"};
+    if (argc < 2)
+    {
+        cerr << format("Usage {} <serial port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    PPK2 ppk{argv[1]};
     if (!ppk.stopMeasure())
     {
         cout << "Failed to stop measure" << endl;
@@ -412,8 +424,8 @@ int main(int argc, char *argv[])
     }
 
     buf[count] = 0;
-    cout << buf << endl;
-    cout << "DONE" << endl;
+    // cout << buf << endl;
+    // cout << "DONE" << endl;
 
     ppk.parseMeta(buf);
     // ppk.printMeta();
@@ -424,6 +436,7 @@ int main(int argc, char *argv[])
     // sleep(2);
 
 
+    cout << "START MEASURE" << endl;
     ppk.startMeasure();
     ppk.stopMeasure();
 
