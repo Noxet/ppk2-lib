@@ -22,20 +22,51 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define BAUDRATE B115200
-#define _POSIX_SOURCE 1 /* POSIX compliant source */
-#define FALSE 0
-#define TRUE 1
-
-
-#define TOCHAR(x) (static_cast<char>(x))
-
-constexpr unsigned int MIN_VOLTAGE = 800;
-constexpr unsigned int MAX_VOLTAGE = 5000;
 
 using namespace std;
 
 
+#define BAUDRATE B115200
+#define TOCHAR(x) (static_cast<char>(x))
+
+static constexpr unsigned int MIN_VOLTAGE = 800;
+static constexpr unsigned int MAX_VOLTAGE = 5000;
+static const std::string AMPERE_MODE = "AMPERE_MODE";
+static const std::string SOURCE_MODE = "SOURCE_MODE";
+
+
+enum class Command : char
+{
+    NO_OP = 0x00,
+    TRIGGER_SET = 0x01,
+    AVG_NUM_SET = 0x02,
+    TRIGGER_WINDOW_SET = 0x03,
+    TRIGGER_INTERVAL_SET = 0x04,
+    TRIGGER_SINGLE_SET = 0x05,
+    AVERAGE_START = 0x06,
+    AVERAGE_STOP = 0x07,
+    RANGE_SET = 0x08,
+    LCD_SET = 0x09,
+    TRIGGER_STOP = 0x0a,
+    DEVICE_RUNNING_SET = 0x0c,
+    REGULATOR_SET = 0x0d,
+    SWITCH_POINT_DOWN = 0x0e,
+    SWITCH_POINT_UP = 0x0f,
+    TRIGGER_EXT_TOGGLE = 0x11,
+    SET_POWER_MODE = 0x11,
+    RES_USER_SET = 0x12,
+    SPIKE_FILTERING_ON = 0x15,
+    SPIKE_FILTERING_OFF = 0x16,
+    GET_META_DATA = 0x19,
+    RESET = 0x20,
+    SET_USER_GAINS = 0x25,
+};
+
+
+/**
+ * Serial class
+ * Handles low-level serial port communication
+ */
 
 Serial::Serial(const std::string &path)
     : m_path(path)
@@ -62,12 +93,14 @@ Serial::Serial(const std::string &path)
     tcsetattr(m_fd, TCSANOW, &m_newtio);
 }
 
+
 Serial::~Serial()
 {
     tcsetattr(m_fd, TCSANOW, &m_oldtio);
     if (m_fd >= 0) close(m_fd);
     cout << "Cleanup serial" << endl;
 }
+
 
 bool Serial::write(char *data, size_t len)
 {
@@ -106,6 +139,7 @@ ssize_t Serial::read(char *buf, size_t len)
 
 /**
  * PPK2 Class
+ * Manages the Power Profiler device.
  */
 
 PPK2::PPK2(const string &path)
@@ -114,10 +148,12 @@ PPK2::PPK2(const string &path)
     
 }
 
+
 PPK2::~PPK2()
 {
     //reset();
 }
+
 
 bool PPK2::setMode(enum Mode mode)
 {
@@ -126,6 +162,7 @@ bool PPK2::setMode(enum Mode mode)
     data[1] = mode == Mode::SRC_MODE ? TOCHAR(Command::AVG_NUM_SET) : TOCHAR(Command::TRIGGER_SET);
     return m_serial.write(data, sizeof(data));
 }
+
 
 bool PPK2::setSourceVoltage(unsigned int mv)
 {
@@ -146,12 +183,13 @@ bool PPK2::setDUTPower(bool on)
     return m_serial.write(data, sizeof(data));
 }
 
+
 void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
 {
     double adcMult = 1.8 / 163840;
+    // TODO(noxet): Handle this in a better way.
+    // Save a small buffer with the remainder if len % 4 != 0, and handle it at the next call
     assert(len % 4 == 0);
-    // size_t values = len / 4;
-    // cout << "values: " << values << endl;
     cnt = 0;
     for (size_t i = 0; i + 3 < len; i += 4)
     {
@@ -164,11 +202,10 @@ void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
         double analogValNoGain = (adcRes - m_O[currRange]) * (adcMult / m_R[currRange]);
         double current = m_UG[currRange] * (analogValNoGain * (m_GS[currRange] * analogValNoGain + m_GI[currRange])
                 + (m_S[currRange] * (m_vdd / 1000.0) + m_I[currRange]));
-        current *= 1000000;
+        current *= 1000000.0;
 
         result[cnt] = current;
         cnt++;
-        // printf(" %.4f ", current);
     }
 }
 
@@ -189,6 +226,8 @@ bool PPK2::stopMeasure()
     return true;
 }
 
+
+// TODO(noxet): return status code instead, make sure to handle errors from write and read
 void PPK2::startMeasure()
 {
     double *result = (double *) malloc(1024 * 1024 * sizeof(*result));
@@ -208,16 +247,12 @@ void PPK2::startMeasure()
         auto start = chrono::steady_clock::now();
         while (chrono::steady_clock::now() - start < 5s)
         {
+            // TODO(noxet): Keep track of the amount of timeouts.
+            // If we get too many, maybe the device has been disconnected, we need to handle it.
+            // Also, reset the timeouts counter when we get actual data
             ssize_t count = m_serial.read((char *)buf, sizeof(buf));
             if (count == 0) continue;
-            // printf("RAW (%ld): [", count);
-            // for (int i = 0; i < count; i++)
-            // {
-            //     printf("%02x, ", buf[i]);
-            // }
-            // printf("]\n");
             size_t cnt = 0;
-            // printf("[");
             convertADC(buf, count, &result[totCnt], cnt);
             totCnt += cnt;
             reads++;
@@ -239,6 +274,7 @@ void PPK2::startMeasure()
 }
 
 
+// TODO(noxet): return status code instead
 void PPK2::reset()
 {
     char data[1] = { TOCHAR(Command::RESET) };
@@ -248,11 +284,9 @@ void PPK2::reset()
     }
 }
 
-
+// TODO(noxet): return status code instead
 void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
 {
-    TimeFunction;
-
     char data[] = { TOCHAR(Command::GET_META_DATA) };
     if (!m_serial.write(data, sizeof(data)))
     {
@@ -263,22 +297,17 @@ void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
     size_t totalCount = 0;
     do
     {
+        // read until we get a serial timeout
         count = m_serial.read(&buf[totalCount], len);
-        // printf("Data during get meta: [");
-        // for (int i = totalCount; i < totalCount + count; i++)
-        // {
-        //     printf("%x ", buf[i]);
-        // }
-        // printf("]\n");
         totalCount += count;
-        // cout << "tot: " << totalCount << endl;
     } while (count != 0);
 
     *dataRead = totalCount;
 }
 
+
 template<typename T>
-T parseRow(istringstream &iss)
+T PPK2::parseRow(istringstream &iss)
 {
     iss.ignore(numeric_limits<streamsize>::max(), ':');
 
@@ -286,6 +315,7 @@ T parseRow(istringstream &iss)
     iss >> v;
     return v;
 }
+
 
 void PPK2::parseMeta(const string &meta)
 {
