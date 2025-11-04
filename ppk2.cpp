@@ -229,7 +229,7 @@ bool PPK2::stopMeasure()
 
 
 // TODO(noxet): return status code instead, make sure to handle errors from write and read
-void PPK2::startMeasure()
+void PPK2::startMeasure(size_t duration)
 {
     // TODO(noxet): use a smaller buffer and write to file in chunks.
     double *result = (double *) malloc(1024 * 1024 * sizeof(*result));
@@ -242,8 +242,9 @@ void PPK2::startMeasure()
 
     int reads = 0;
     size_t totCnt = 0;
+    auto runTime = chrono::duration<double>(duration);
     auto start = chrono::steady_clock::now();
-    while (chrono::steady_clock::now() - start < 5s)
+    while (chrono::steady_clock::now() - start < runTime)
     {
         // TODO(noxet): Keep track of the amount of timeouts.
         // If we get too many, maybe the device has been disconnected, we need to handle it.
@@ -437,12 +438,13 @@ void PPK2::printMeta()
 
 int main(int argc, char *argv[])
 {
-    if (argc < 2)
+    if (argc < 3)
     {
-        cerr << format("Usage {} <serial port>\n", argv[0]);
+        cerr << format("Usage {} <serial port> <sampling duration in seconds (double)>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
+    double runTime = atof(argv[2]);
     PPK2 ppk{argv[1]};
     if (!ppk.stopMeasure())
     {
@@ -456,7 +458,7 @@ int main(int argc, char *argv[])
     ppk.setDUTPower(true);
 
     cout << "START MEASURE" << endl;
-    ppk.startMeasure();
+    ppk.startMeasure(runTime);
     ppk.stopMeasure();
 
     ppk.setDUTPower(false);
