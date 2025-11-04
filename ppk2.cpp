@@ -231,6 +231,7 @@ bool PPK2::stopMeasure()
 // TODO(noxet): return status code instead, make sure to handle errors from write and read
 void PPK2::startMeasure()
 {
+    // TODO(noxet): use a smaller buffer and write to file in chunks.
     double *result = (double *) malloc(1024 * 1024 * sizeof(*result));
     assert(result);
 
@@ -241,20 +242,18 @@ void PPK2::startMeasure()
 
     int reads = 0;
     size_t totCnt = 0;
+    auto start = chrono::steady_clock::now();
+    while (chrono::steady_clock::now() - start < 5s)
     {
-        auto start = chrono::steady_clock::now();
-        while (chrono::steady_clock::now() - start < 5s)
-        {
-            // TODO(noxet): Keep track of the amount of timeouts.
-            // If we get too many, maybe the device has been disconnected, we need to handle it.
-            // Also, reset the timeouts counter when we get actual data
-            ssize_t count = m_serial.read((char *)buf, sizeof(buf));
-            if (count == 0) continue;
-            size_t cnt = 0;
-            convertADC(buf, count, &result[totCnt], cnt);
-            totCnt += cnt;
-            reads++;
-        }
+        // TODO(noxet): Keep track of the amount of timeouts.
+        // If we get too many, maybe the device has been disconnected, we need to handle it.
+        // Also, reset the timeouts counter when we get actual data
+        ssize_t count = m_serial.read((char *)buf, sizeof(buf));
+        if (count == 0) continue;
+        size_t cnt = 0;
+        convertADC(buf, count, &result[totCnt], cnt);
+        totCnt += cnt;
+        reads++;
     }
 
     cout << "TOTAL COUNT: " << totCnt << endl;
@@ -269,6 +268,8 @@ void PPK2::startMeasure()
     {
         file << result[i] << ", ";
     }
+
+    free(result);
 }
 
 
@@ -376,6 +377,14 @@ void PPK2::parseMeta(const string &meta)
     m_UG[4] = parseRow<double>(iss);
 
     int ia = parseRow<int>(iss);
+
+    // The meta data ends with an "END" string
+    string end{};
+    iss >> end;
+    if (end != "END")
+    {
+        cerr << format("Did not parse entire meta data\n");
+    }
 }
 
 
