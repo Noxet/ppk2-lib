@@ -44,14 +44,14 @@ public:
     void startMeasure();
     bool stopMeasure();
     void reset();
-    void getMeta(char *buf, size_t len, ssize_t *dataRead);
-    void parseMeta(const std::string &meta);
+    void getMeta();
     void printMeta();
 
 private:
 
     // void convertADC(uint8_t *data, size_t len);
     void convertADC(uint8_t *data, size_t len, double *result, size_t &cnt);
+    void parseMeta(const std::string &meta);
     template<typename T> T parseRow(std::istringstream &iss);
 
 private:

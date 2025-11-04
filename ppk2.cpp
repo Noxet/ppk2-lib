@@ -102,6 +102,7 @@ Serial::~Serial()
 }
 
 
+// TODO(noxet): Maybe return the amount written instead of bool?
 bool Serial::write(char *data, size_t len)
 {
     size_t totalWrite{0};
@@ -186,6 +187,7 @@ bool PPK2::setDUTPower(bool on)
 
 void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
 {
+    // TODO(noxet): save this in class instead, no need to calc the same shit again and again
     double adcMult = 1.8 / 163840;
     // TODO(noxet): Handle this in a better way.
     // Save a small buffer with the remainder if len % 4 != 0, and handle it at the next call
@@ -285,7 +287,7 @@ void PPK2::reset()
 }
 
 // TODO(noxet): return status code instead
-void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
+void PPK2::getMeta()
 {
     char data[] = { TOCHAR(Command::GET_META_DATA) };
     if (!m_serial.write(data, sizeof(data)))
@@ -293,16 +295,25 @@ void PPK2::getMeta(char *buf, size_t len, ssize_t *dataRead)
         cerr << "Failed to get meta data\n";
     }
 
+    constexpr size_t bufSize = 10 * 1024;
+    char *buf = (char *) malloc(bufSize);
     ssize_t count = 0;
     size_t totalCount = 0;
     do
     {
         // read until we get a serial timeout
-        count = m_serial.read(&buf[totalCount], len);
+        count = m_serial.read(&buf[totalCount], bufSize - totalCount);
         totalCount += count;
+        if (totalCount >= bufSize)
+        {
+            cout << format("Buffer full while reading meta data, please increase the buffer size\n");
+            break;
+        }
     } while (count != 0);
 
-    *dataRead = totalCount;
+    buf[totalCount] = 0;
+    parseMeta(buf);
+    free(buf);
 }
 
 
@@ -434,44 +445,18 @@ int main(int argc, char *argv[])
     {
         cout << "Failed to stop measure" << endl;
     }
-    char *buf = (char *) malloc(100 * 1024);
-    ssize_t count;
-    size_t tries = 0;
-    do
-    {
-        ppk.getMeta(buf, sizeof(buf) - 1, &count);
-        if (count == 0)
-        {
-            cout << "Could not read meta" << endl;
-        }
-        tries++;
-    } while (count == 0 && tries < 5);
 
-    if (tries >= 5)
-    {
-        cout << "Failed to get meta, quitting..." << endl;
-        return EXIT_FAILURE;
-    }
+    ppk.getMeta();
 
-    buf[count] = 0;
-    // cout << buf << endl;
-    // cout << "DONE" << endl;
-
-    ppk.parseMeta(buf);
-    // ppk.printMeta();
-    // ppk.reset();
     ppk.setMode(Mode::SRC_MODE);
     ppk.setSourceVoltage(3300);
     ppk.setDUTPower(true);
-    // sleep(2);
-
 
     cout << "START MEASURE" << endl;
     ppk.startMeasure();
     ppk.stopMeasure();
 
     ppk.setDUTPower(false);
-    free(buf);
 
     endProfiler();
 }
