@@ -1,5 +1,4 @@
 #include "ppk2.h"
-#include "profiler.cpp"
 
 #include <algorithm>
 #include <cassert>
@@ -235,8 +234,6 @@ void PPK2::startMeasure()
     double *result = (double *) malloc(1024 * 1024 * sizeof(*result));
     assert(result);
 
-    TimeFunction;
-
     char data[1] = { TOCHAR(Command::AVERAGE_START) };
     m_serial.write(data, sizeof(data));
 
@@ -245,7 +242,6 @@ void PPK2::startMeasure()
     int reads = 0;
     size_t totCnt = 0;
     {
-        TimeBlock("Read and convert");
         auto start = chrono::steady_clock::now();
         while (chrono::steady_clock::now() - start < 5s)
         {
@@ -432,8 +428,6 @@ void PPK2::printMeta()
 
 int main(int argc, char *argv[])
 {
-    beginProfiler();
-
     if (argc < 2)
     {
         cerr << format("Usage {} <serial port>\n", argv[0]);
@@ -457,6 +451,4 @@ int main(int argc, char *argv[])
     ppk.stopMeasure();
 
     ppk.setDUTPower(false);
-
-    endProfiler();
 }
