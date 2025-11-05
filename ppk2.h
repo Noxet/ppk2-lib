@@ -57,13 +57,21 @@ private:
 private:
     Serial m_serial;
 
-    double m_R[5];
-    double m_GS[5];
-    double m_GI[5];
-    double m_O[5];
-    double m_S[5];
-    double m_I[5];
-    double m_UG[5];
+    struct Meta
+    {
+        int vdd;
+        int hw;
+        int mode;
+        int ia;
 
-    int m_vdd;
+        double R[5];
+        double GS[5];
+        double GI[5];
+        double O[5];
+        double S[5];
+        double I[5];
+        double UG[5];
+    };
+
+    struct Meta m_meta;
 };

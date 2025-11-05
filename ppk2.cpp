@@ -200,9 +200,9 @@ void PPK2::convertADC(uint8_t *data, size_t len, double *result, size_t &cnt)
         uint32_t currMask = ((1 << 3) - 1) << 14;
         uint32_t currRange = (adcVal & currMask) >> 14;
         currRange = min(currRange, (uint32_t) 4);
-        double analogValNoGain = (adcRes - m_O[currRange]) * (adcMult / m_R[currRange]);
-        double current = m_UG[currRange] * (analogValNoGain * (m_GS[currRange] * analogValNoGain + m_GI[currRange])
-                + (m_S[currRange] * (m_vdd / 1000.0) + m_I[currRange]));
+        double analogValNoGain = (adcRes - m_meta.O[currRange]) * (adcMult / m_meta.R[currRange]);
+        double current = m_meta.UG[currRange] * (analogValNoGain * (m_meta.GS[currRange] * analogValNoGain + m_meta.GI[currRange])
+                + (m_meta.S[currRange] * (m_meta.vdd / 1000.0) + m_meta.I[currRange]));
         current *= 1000000.0;
 
         result[cnt] = current;
@@ -331,53 +331,53 @@ void PPK2::parseMeta(const string &meta)
     istringstream iss(meta);
     int calibrated = parseRow<int>(iss);
 
-    m_R[0] = parseRow<double>(iss);
-    m_R[1] = parseRow<double>(iss);
-    m_R[2] = parseRow<double>(iss);
-    m_R[3] = parseRow<double>(iss);
-    m_R[4] = parseRow<double>(iss);
+    m_meta.R[0] = parseRow<double>(iss);
+    m_meta.R[1] = parseRow<double>(iss);
+    m_meta.R[2] = parseRow<double>(iss);
+    m_meta.R[3] = parseRow<double>(iss);
+    m_meta.R[4] = parseRow<double>(iss);
 
-    m_GS[0] = parseRow<double>(iss);
-    m_GS[1] = parseRow<double>(iss);
-    m_GS[2] = parseRow<double>(iss);
-    m_GS[3] = parseRow<double>(iss);
-    m_GS[4] = parseRow<double>(iss);
+    m_meta.GS[0] = parseRow<double>(iss);
+    m_meta.GS[1] = parseRow<double>(iss);
+    m_meta.GS[2] = parseRow<double>(iss);
+    m_meta.GS[3] = parseRow<double>(iss);
+    m_meta.GS[4] = parseRow<double>(iss);
 
-    m_GI[0] = parseRow<double>(iss);
-    m_GI[1] = parseRow<double>(iss);
-    m_GI[2] = parseRow<double>(iss);
-    m_GI[3] = parseRow<double>(iss);
-    m_GI[4] = parseRow<double>(iss);
+    m_meta.GI[0] = parseRow<double>(iss);
+    m_meta.GI[1] = parseRow<double>(iss);
+    m_meta.GI[2] = parseRow<double>(iss);
+    m_meta.GI[3] = parseRow<double>(iss);
+    m_meta.GI[4] = parseRow<double>(iss);
 
-    m_O[0] = parseRow<double>(iss);
-    m_O[1] = parseRow<double>(iss);
-    m_O[2] = parseRow<double>(iss);
-    m_O[3] = parseRow<double>(iss);
-    m_O[4] = parseRow<double>(iss);
+    m_meta.O[0] = parseRow<double>(iss);
+    m_meta.O[1] = parseRow<double>(iss);
+    m_meta.O[2] = parseRow<double>(iss);
+    m_meta.O[3] = parseRow<double>(iss);
+    m_meta.O[4] = parseRow<double>(iss);
 
-    m_vdd = parseRow<int>(iss);
-    int hw = parseRow<int>(iss);
-    int mode = parseRow<int>(iss);
+    m_meta.vdd = parseRow<int>(iss);
+    m_meta.hw = parseRow<int>(iss);
+    m_meta.mode = parseRow<int>(iss);
 
-    m_S[0] = parseRow<double>(iss);
-    m_S[1] = parseRow<double>(iss);
-    m_S[2] = parseRow<double>(iss);
-    m_S[3] = parseRow<double>(iss);
-    m_S[4] = parseRow<double>(iss);
+    m_meta.S[0] = parseRow<double>(iss);
+    m_meta.S[1] = parseRow<double>(iss);
+    m_meta.S[2] = parseRow<double>(iss);
+    m_meta.S[3] = parseRow<double>(iss);
+    m_meta.S[4] = parseRow<double>(iss);
 
-    m_I[0] = parseRow<double>(iss);
-    m_I[1] = parseRow<double>(iss);
-    m_I[2] = parseRow<double>(iss);
-    m_I[3] = parseRow<double>(iss);
-    m_I[4] = parseRow<double>(iss);
+    m_meta.I[0] = parseRow<double>(iss);
+    m_meta.I[1] = parseRow<double>(iss);
+    m_meta.I[2] = parseRow<double>(iss);
+    m_meta.I[3] = parseRow<double>(iss);
+    m_meta.I[4] = parseRow<double>(iss);
 
-    m_UG[0] = parseRow<double>(iss);
-    m_UG[1] = parseRow<double>(iss);
-    m_UG[2] = parseRow<double>(iss);
-    m_UG[3] = parseRow<double>(iss);
-    m_UG[4] = parseRow<double>(iss);
+    m_meta.UG[0] = parseRow<double>(iss);
+    m_meta.UG[1] = parseRow<double>(iss);
+    m_meta.UG[2] = parseRow<double>(iss);
+    m_meta.UG[3] = parseRow<double>(iss);
+    m_meta.UG[4] = parseRow<double>(iss);
 
-    int ia = parseRow<int>(iss);
+    m_meta.ia = parseRow<int>(iss);
 
     // The meta data ends with an "END" string
     string end{};
@@ -392,43 +392,43 @@ void PPK2::parseMeta(const string &meta)
 void PPK2::printMeta()
 {
     printf("R: [");
-    for (const auto &i : m_R)
+    for (const auto &i : m_meta.R)
     {
         printf("%f ", i);
     }
 
     printf("]\nGS: [");
-    for (const auto &i : m_GS)
+    for (const auto &i : m_meta.GS)
     {
         printf("%f ", i);
     }
 
     printf("]\nGI: [");
-    for (const auto &i : m_GI)
+    for (const auto &i : m_meta.GI)
     {
         printf("%f ", i);
     }
 
     printf("]\nO: [");
-    for (const auto &i : m_O)
+    for (const auto &i : m_meta.O)
     {
         printf("%f ", i);
     }
 
     printf("]\nS: [");
-    for (const auto &i : m_S)
+    for (const auto &i : m_meta.S)
     {
         printf("%f ", i);
     }
 
     printf("]\nI: [");
-    for (const auto &i : m_I)
+    for (const auto &i : m_meta.I)
     {
         printf("%f ", i);
     }
 
     printf("]\nUG: [");
-    for (const auto &i : m_UG)
+    for (const auto &i : m_meta.UG)
     {
         printf("%f ", i);
     }
