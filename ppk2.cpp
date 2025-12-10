@@ -1,11 +1,9 @@
 #include "ppk2.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <ios>
 #include <iostream>
 #include <fstream>
@@ -13,6 +11,11 @@
 #include <string>
 #include <system_error>
 #include <sstream>
+
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <csignal>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -23,6 +26,8 @@
 
 
 using namespace std;
+
+std::atomic<bool> runMeasureLoop{true};
 
 
 #define BAUDRATE B115200
@@ -244,7 +249,10 @@ void PPK2::startMeasure(size_t duration)
     size_t totCnt = 0;
     auto runTime = chrono::duration<double>(duration);
     auto start = chrono::steady_clock::now();
-    while (chrono::steady_clock::now() - start < runTime)
+    auto last = chrono::steady_clock::now();
+    size_t bps = 0;
+    // Either stop loop via signal, or when time runs out
+    while (runMeasureLoop && chrono::steady_clock::now() - start < runTime)
     {
         // TODO(noxet): Keep track of the amount of timeouts.
         // If we get too many, maybe the device has been disconnected, we need to handle it.
@@ -254,7 +262,15 @@ void PPK2::startMeasure(size_t duration)
         size_t cnt = 0;
         convertADC(buf, count, &result[totCnt], cnt);
         totCnt += cnt;
+        bps += cnt;
         reads++;
+        auto now = chrono::steady_clock::now();
+        if (now - last > 1s)
+        {
+            cout << "Rate: " << bps << " B/s\n";
+            bps = 0;
+            last = now;
+        }
     }
 
     cout << "TOTAL COUNT: " << totCnt << endl;
@@ -436,6 +452,13 @@ void PPK2::printMeta()
 }
 
 
+void signalHandler(int signum)
+{
+    cout << "got signal: " << signum << endl;
+    runMeasureLoop = false;
+}
+
+
 int main(int argc, char *argv[])
 {
     if (argc < 3)
@@ -443,6 +466,8 @@ int main(int argc, char *argv[])
         cerr << format("Usage {} <serial port> <sampling duration in seconds (double)>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    signal(SIGTERM, signalHandler);
 
     double runTime = atof(argv[2]);
     PPK2 ppk{argv[1]};
