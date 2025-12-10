@@ -482,6 +482,7 @@ int main(int argc, char *argv[])
     }
 
     signal(SIGTERM, signalHandler);
+    signal(SIGINT, signalHandler);
 
     double runTime = atof(argv[2]);
     PPK2 ppk{argv[1]};
