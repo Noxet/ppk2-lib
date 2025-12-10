@@ -236,14 +236,25 @@ bool PPK2::stopMeasure()
 // TODO(noxet): return status code instead, make sure to handle errors from write and read
 void PPK2::startMeasure(size_t duration)
 {
-    // TODO(noxet): use a smaller buffer and write to file in chunks.
-    double *result = (double *) malloc(1024 * 1024 * sizeof(*result));
-    assert(result);
+    ofstream file("out.txt");
+    if (!file)
+    {
+        // TODO(noxet): return error code
+        cerr << "Failed to open file to dump data" << endl;
+        return;
+    }
+
+    const size_t FLUSH_TRESHOLD = 100 * 1024; // flush approx every second
+
+    // double *result = (double *) malloc(MAX_BUFFER * sizeof(*result));
+    // TODO(noxet): error handling
+    // assert(result);
 
     char data[1] = { TOCHAR(Command::AVERAGE_START) };
     m_serial.write(data, sizeof(data));
 
-    uint8_t buf[128]{};
+    uint8_t uartBuf[128]{};
+    double adcBuf[2 * FLUSH_TRESHOLD]{}; // the size needs to be at least uartBuf/4
 
     int reads = 0;
     size_t totCnt = 0;
@@ -257,10 +268,10 @@ void PPK2::startMeasure(size_t duration)
         // TODO(noxet): Keep track of the amount of timeouts.
         // If we get too many, maybe the device has been disconnected, we need to handle it.
         // Also, reset the timeouts counter when we get actual data
-        ssize_t count = m_serial.read((char *)buf, sizeof(buf));
+        ssize_t count = m_serial.read((char *)uartBuf, sizeof(uartBuf));
         if (count == 0) continue;
         size_t cnt = 0;
-        convertADC(buf, count, &result[totCnt], cnt);
+        convertADC(uartBuf, count, &adcBuf[totCnt], cnt);
         totCnt += cnt;
         bps += cnt;
         reads++;
@@ -271,22 +282,25 @@ void PPK2::startMeasure(size_t duration)
             bps = 0;
             last = now;
         }
+
+        if (totCnt >= FLUSH_TRESHOLD)
+        {
+            for (size_t i = 0; i < totCnt; i++)
+            {
+                file << adcBuf[i] << ", ";
+            }
+
+            totCnt = 0;
+        }
     }
 
-    cout << "TOTAL COUNT: " << totCnt << endl;
-
-    ofstream file("out.txt");
-    if (!file)
-    {
-        cerr << "Failed to open file" << endl;
-    }
-
+    // write the remaining data to file
     for (size_t i = 0; i < totCnt; i++)
     {
-        file << result[i] << ", ";
+        file << adcBuf[i] << ", ";
     }
 
-    free(result);
+    file.close();
 }
 
 
