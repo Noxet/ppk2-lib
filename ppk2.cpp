@@ -272,7 +272,19 @@ void PPK2::startMeasure(double duration, string outFile)
         // TODO(noxet): Keep track of the amount of timeouts.
         // If we get too many, maybe the device has been disconnected, we need to handle it.
         // Also, reset the timeouts counter when we get actual data
-        ssize_t count = m_serial.read((char *)uartBuf, sizeof(uartBuf));
+        ssize_t count = 0;
+        ssize_t readCnt = 0;
+        do
+        {
+            readCnt = m_serial.read((char *)&uartBuf[count], sizeof(uartBuf) - count);
+            if (readCnt == 0)
+            {
+                cerr << "Got timeout during read, should not happen!\n";
+                break;
+            }
+            count += readCnt;
+        } while (count < sizeof(uartBuf));
+
         if (count == 0) continue;
         size_t cnt = 0;
         convertADC(uartBuf, count, &adcBuf[totCnt], cnt);
