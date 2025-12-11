@@ -1,4 +1,5 @@
 #include "ppk2.h"
+#include "CLI11.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -123,7 +124,10 @@ bool Serial::write(char *data, size_t len)
 
 ssize_t Serial::read(char *buf, size_t len)
 {
-    struct pollfd pfd = { .fd = m_fd, .events = POLLIN };
+    struct pollfd pfd{};
+    pfd.fd = m_fd;
+    pfd.events = POLLIN;
+
     int res = poll(&pfd, 1, 500);
     if (res == 0)
     {
@@ -174,8 +178,8 @@ bool PPK2::setSourceVoltage(unsigned int mv)
     unsigned int setVoltage = std::clamp(mv, MIN_VOLTAGE, MAX_VOLTAGE);
     char data[3];
     data[0] = TOCHAR(Command::REGULATOR_SET);
-    data[1] = (setVoltage & 0xff00) >> 8;
-    data[2] = setVoltage & 0xff;
+    data[1] = TOCHAR((setVoltage & 0xff00) >> 8);
+    data[2] = TOCHAR(setVoltage & 0xff);
     return m_serial.write(data, sizeof(data));
 }
 
@@ -234,9 +238,9 @@ bool PPK2::stopMeasure()
 
 
 // TODO(noxet): return status code instead, make sure to handle errors from write and read
-void PPK2::startMeasure(size_t duration)
+void PPK2::startMeasure(double duration, string outFile)
 {
-    ofstream file("out.txt");
+    ofstream file(outFile);
     if (!file)
     {
         // TODO(noxet): return error code
@@ -334,7 +338,7 @@ void PPK2::getMeta()
         totalCount += count;
         if (totalCount >= bufSize)
         {
-            cout << format("Buffer full while reading meta data, please increase the buffer size\n");
+            cout << "Buffer full while reading meta data, please increase the buffer size\n";
             break;
         }
     } while (count != 0);
@@ -360,6 +364,7 @@ void PPK2::parseMeta(const string &meta)
 {
     istringstream iss(meta);
     int calibrated = parseRow<int>(iss);
+    (void) calibrated;
 
     m_meta.R[0] = parseRow<double>(iss);
     m_meta.R[1] = parseRow<double>(iss);
@@ -414,7 +419,7 @@ void PPK2::parseMeta(const string &meta)
     iss >> end;
     if (end != "END")
     {
-        cerr << format("Did not parse entire meta data\n");
+        cerr << "Did not parse entire meta data\n";
     }
 }
 
@@ -475,31 +480,59 @@ void signalHandler(int signum)
 
 int main(int argc, char *argv[])
 {
-    if (argc < 3)
-    {
-        cerr << format("Usage {} <serial port> <sampling duration in seconds (double)>\n", argv[0]);
-        exit(EXIT_FAILURE);
-    }
+    CLI::App app{"PPK2 control"};
+
+    // power on command
+    string device;
+    int voltageMilli;
+    auto *poweron = app.add_subcommand("poweron", "Power on the device");
+    poweron->add_option("millivoltage, -v", voltageMilli, "Voltage in millivolts")->required();
+
+    // measure command
+    double duration;
+    string outFile;
+    auto *measure = app.add_subcommand("measure", "Start power measurement");
+    measure->add_option("device, -d", device, "Path to the device, e.g., /dev/ttyACM0")->required();
+    measure->add_option("duration, -t", duration, "Time to run measure loop in seconds")->required();
+    measure->add_option("millivoltage, -v", voltageMilli, "Voltage in millivolts")->required();
+    measure->add_option("outfile, -o", outFile, "Filename to store the measure-data")->required();
+
+    CLI11_PARSE(app, argc, argv);
+
 
     signal(SIGTERM, signalHandler);
     signal(SIGINT, signalHandler);
 
-    double runTime = atof(argv[2]);
-    PPK2 ppk{argv[1]};
-    if (!ppk.stopMeasure())
+
+    if (*poweron)
     {
-        cout << "Failed to stop measure" << endl;
+        cout << "Power on: " << device << ", volt: " << voltageMilli << "\n";
+    }
+    else if (*measure)
+    {
+        // make sure we are in a good state
+        PPK2 ppk{device};
+        if (!ppk.stopMeasure())
+        {
+            cout << "Failed to stop measure" << endl;
+        }
+        ppk.setDUTPower(false);
+
+        ppk.getMeta();
+        ppk.setMode(Mode::SRC_MODE);
+        ppk.setSourceVoltage(voltageMilli);
+        ppk.setDUTPower(true);
+
+        cout << "START MEASURE" << endl;
+        ppk.startMeasure(duration, outFile);
+        ppk.stopMeasure();
+
+        ppk.setDUTPower(false);
+    }
+    else
+    {
+        cout << app.help();
     }
 
-    ppk.getMeta();
-
-    ppk.setMode(Mode::SRC_MODE);
-    ppk.setSourceVoltage(3300);
-    ppk.setDUTPower(true);
-
-    cout << "START MEASURE" << endl;
-    ppk.startMeasure(runTime);
-    ppk.stopMeasure();
-
-    ppk.setDUTPower(false);
+    return EXIT_SUCCESS;
 }

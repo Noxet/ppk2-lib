@@ -41,7 +41,7 @@ public:
     bool setSourceVoltage(unsigned int voltage);
     bool setDUTPower(bool on);
     bool setMode(enum Mode mode);
-    void startMeasure(size_t duration);
+    void startMeasure(double duration, std::string outFile);
     bool stopMeasure();
     void reset();
     void getMeta();
