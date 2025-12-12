@@ -28,7 +28,7 @@
 
 using namespace std;
 
-std::atomic<bool> runMeasureLoop{true};
+std::atomic<bool> runLoop{true};
 
 
 #define BAUDRATE B115200
@@ -267,12 +267,12 @@ void PPK2::startMeasure(double duration, string outFile)
     auto last = chrono::steady_clock::now();
     size_t bps = 0;
     // Either stop loop via signal, or when time runs out
-    while (runMeasureLoop && chrono::steady_clock::now() - start < runTime)
+    while (runLoop && chrono::steady_clock::now() - start < runTime)
     {
         // TODO(noxet): Keep track of the amount of timeouts.
         // If we get too many, maybe the device has been disconnected, we need to handle it.
         // Also, reset the timeouts counter when we get actual data
-        ssize_t count = 0;
+        size_t count = 0;
         ssize_t readCnt = 0;
         do
         {
@@ -485,8 +485,8 @@ void PPK2::printMeta()
 
 void signalHandler(int signum)
 {
-    cout << "got signal: " << signum << endl;
-    runMeasureLoop = false;
+    (void)signum;
+    runLoop = false;
 }
 
 
@@ -494,11 +494,15 @@ int main(int argc, char *argv[])
 {
     CLI::App app{"PPK2 control"};
 
+    // Force the user to specify a subcommand
+    app.require_subcommand();
+
     // power on command
     string device;
     int voltageMilli;
     auto *poweron = app.add_subcommand("poweron", "Power on the device");
     poweron->add_option("millivoltage, -v", voltageMilli, "Voltage in millivolts")->required();
+    poweron->add_option("device, -d", device, "Path to the device, e.g., /dev/ttyACM0")->required();
 
     // measure command
     double duration;
@@ -509,26 +513,43 @@ int main(int argc, char *argv[])
     measure->add_option("millivoltage, -v", voltageMilli, "Voltage in millivolts")->required();
     measure->add_option("outfile, -o", outFile, "Filename to store the measure-data")->required();
 
-    CLI11_PARSE(app, argc, argv);
-
+    try
+    {
+        CLI11_PARSE(app, argc, argv);
+    }
+    catch (const CLI::ParseError &e)
+    {
+        return app.exit(e);
+    }
 
     signal(SIGTERM, signalHandler);
     signal(SIGINT, signalHandler);
 
+    // initialize and reset PPK
+    PPK2 ppk{device};
+    if (!ppk.stopMeasure())
+    {
+        cout << "Failed to stop measure" << endl;
+    }
+    ppk.setDUTPower(false);
 
+    // handle arguments
     if (*poweron)
     {
         cout << "Power on: " << device << ", volt: " << voltageMilli << "\n";
+        ppk.setMode(Mode::SRC_MODE);
+        ppk.setSourceVoltage(voltageMilli);
+        ppk.setDUTPower(true);
+
+        // wait until we get a SIGTERM or SIGINT
+        while (runLoop);
+
+        ppk.setDUTPower(false);
+
     }
     else if (*measure)
     {
         // make sure we are in a good state
-        PPK2 ppk{device};
-        if (!ppk.stopMeasure())
-        {
-            cout << "Failed to stop measure" << endl;
-        }
-        ppk.setDUTPower(false);
 
         ppk.getMeta();
         ppk.setMode(Mode::SRC_MODE);
