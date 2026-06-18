@@ -513,6 +513,12 @@ int main(int argc, char *argv[])
     measure->add_option("millivoltage, -v", voltageMilli, "Voltage in millivolts")->required();
     measure->add_option("outfile, -o", outFile, "Filename to store the measure-data")->required();
 
+    // ammeter command
+    auto *ammeter = app.add_subcommand("ammeter", "Start ampere measurement");
+    ammeter->add_option("device, -d", device, "Path to the device, e.g., /dev/ttyACM0")->required();
+    ammeter->add_option("duration, -t", duration, "Time to run measure loop in seconds")->required();
+    ammeter->add_option("outfile, -o", outFile, "Filename to store the measure-data")->required();
+
     try
     {
         CLI11_PARSE(app, argc, argv);
@@ -560,6 +566,17 @@ int main(int argc, char *argv[])
         ppk.startMeasure(duration, outFile);
         ppk.stopMeasure();
 
+        ppk.setDUTPower(false);
+    }
+    else if (*ammeter)
+    {
+        ppk.getMeta();
+        ppk.setMode(Mode::AMP_MODE);
+
+        cout << "START AMPERE MEASURE" << endl;
+        ppk.setDUTPower(true);
+        ppk.startMeasure(duration, outFile);
+        ppk.stopMeasure();
         ppk.setDUTPower(false);
     }
     else
