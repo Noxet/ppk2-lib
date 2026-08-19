@@ -14,7 +14,7 @@ The project was developed to provide a simple, lightweight way of integrating th
 
 ## Acknowledgements
 
-This project was inspired by the [IRNAS ppk2-api-python](https://github.com/IRNAS/ppk2-api-python) project, an unofficial Python API for the Nordic Power Profiler Kit II.
+This project was based on the [IRNAS ppk2-api-python](https://github.com/IRNAS/ppk2-api-python) project, an unofficial Python API for the Nordic Power Profiler Kit II.
 
 ppk2-lib implements similar functionality in C++, with a focus on lightweight command-line usage and integration into C++ applications.
 
